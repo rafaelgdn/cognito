@@ -1,0 +1,266 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: "Passwordless SMS authentication backend using Amazon Cognito User Pools\
+  \ CUSTOM AUTH challenge flow w/ AWS Lambda triggers and Amazon SNS for sending SMS\
+  \ TOTP\n"
+Metadata:
+  AWS::ServerlessRepo::Application:
+    Name: passwordless-sms-email-auth
+    Description: "Passwordless SMS authentication backend using Amazon Cognito User\
+      \ Pools CUSTOM AUTH challenge flow w/ AWS Lambda triggers and Amazon SNS for\
+      \ sending SMS TOTP\n"
+    SpdxLicenseId: MIT
+    LicenseUrl: s3://cf-templates-1ff8q1oa0jx49-us-east-1/dccb8cfd068b1021fcc401746d63165a
+    Labels:
+    - passwordless
+    - authentication
+    - cognito
+    - auth
+    - sms
+    - iOS
+    - mobile
+    - pinpoint
+    - serverless
+    - amplify
+    SemanticVersion: 1.14.20
+Globals:
+  Api:
+    Cors:
+      AllowMethods: "'GET,POST,OPTIONS'"
+      AllowHeaders: "'content-type'"
+      AllowOrigin: "'*'"
+  Function:
+    Timeout: 30
+Parameters:
+  UserPoolName:
+    Type: String
+    Description: The name you want the User Pool to be created with
+    Default: rafaelTest
+Resources:
+  DefineAuthChallenge:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://cf-templates-1ff8q1oa0jx49-us-east-1/5e62463f735ff0afb13a5e34107473e0
+      Handler: define-auth-challenge.handler
+      Runtime: nodejs12.x
+  CreateAuthChallenge:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://cf-templates-1ff8q1oa0jx49-us-east-1/a6d28fc5840a7af038badbde4ae84a15
+      Handler: create-auth-challenge.handler
+      Runtime: nodejs12.x
+      Policies:
+      - Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - mobiletargeting:*
+          - sns:*
+          - ses:*
+          Resource: '*'
+  VerifyAuthChallengeResponse:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://cf-templates-1ff8q1oa0jx49-us-east-1/5635dc567be108937588a7290404fbad
+      Handler: verify-auth-challenge-response.handler
+      Runtime: nodejs12.x
+  PreSignUp:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://cf-templates-1ff8q1oa0jx49-us-east-1/fffa418ade30f9ae5290e1083cf1667f
+      Handler: pre-sign-up.handler
+      Runtime: nodejs12.x
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName:
+        Ref: UserPoolName
+      Schema:
+      - Name: phone_number
+        AttributeDataType: String
+        Mutable: true
+      - Name: email
+        AttributeDataType: String
+        Mutable: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 6
+          RequireLowercase: false
+          RequireNumbers: false
+          RequireSymbols: false
+          RequireUppercase: false
+      AliasAttributes:
+      - email
+      - phone_number
+      MfaConfiguration: 'OFF'
+      LambdaConfig:
+        CreateAuthChallenge:
+          Fn::GetAtt:
+          - CreateAuthChallenge
+          - Arn
+        DefineAuthChallenge:
+          Fn::GetAtt:
+          - DefineAuthChallenge
+          - Arn
+        PreSignUp:
+          Fn::GetAtt:
+          - PreSignUp
+          - Arn
+        VerifyAuthChallengeResponse:
+          Fn::GetAtt:
+          - VerifyAuthChallengeResponse
+          - Arn
+  DefineAuthChallengeInvocationPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Fn::GetAtt:
+        - DefineAuthChallenge
+        - Arn
+      Principal: cognito-idp.amazonaws.com
+      SourceArn:
+        Fn::GetAtt:
+        - UserPool
+        - Arn
+  CreateAuthChallengeInvocationPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Fn::GetAtt:
+        - CreateAuthChallenge
+        - Arn
+      Principal: cognito-idp.amazonaws.com
+      SourceArn:
+        Fn::GetAtt:
+        - UserPool
+        - Arn
+  VerifyAuthChallengeResponseInvocationPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Fn::GetAtt:
+        - VerifyAuthChallengeResponse
+        - Arn
+      Principal: cognito-idp.amazonaws.com
+      SourceArn:
+        Fn::GetAtt:
+        - UserPool
+        - Arn
+  PreSignUpInvocationPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Fn::GetAtt:
+        - PreSignUp
+        - Arn
+      Principal: cognito-idp.amazonaws.com
+      SourceArn:
+        Fn::GetAtt:
+        - UserPool
+        - Arn
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: sms-auth-client
+      GenerateSecret: false
+      UserPoolId:
+        Ref: UserPool
+      ExplicitAuthFlows:
+      - CUSTOM_AUTH_FLOW_ONLY
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: sms-email-passwordless
+      UserPoolId:
+        Ref: UserPool
+  SignIn:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://cf-templates-1ff8q1oa0jx49-us-east-1/36de48aaf880aac59ce7bc19741cd206
+      Handler: signin.handler
+      Runtime: nodejs12.x
+      Timeout: 30
+      Policies:
+      - Statement:
+        - Sid: CognitoAdminCreateUser
+          Effect: Allow
+          Action:
+          - cognito-idp:AdminCreateUser
+          Resource: '*'
+      Environment:
+        Variables:
+          USER_POOL_ID:
+            Ref: UserPool
+          USER_POOL_CLIENT_ID:
+            Ref: UserPoolClient
+      Events:
+        HttpEvent:
+          Type: Api
+          Properties:
+            Path: /signin
+            Method: post
+  GetDetails:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://cf-templates-1ff8q1oa0jx49-us-east-1/36de48aaf880aac59ce7bc19741cd206
+      Handler: getDetails.handler
+      Runtime: nodejs12.x
+      Timeout: 30
+      Policies:
+      - Statement:
+        - Sid: Cognito
+          Effect: Allow
+          Action:
+          - cognito-idp:*
+          Resource: '*'
+      Environment:
+        Variables:
+          USER_POOL_ID:
+            Ref: UserPool
+      Events:
+        HttpEvent:
+          Type: Api
+          Properties:
+            Path: /get-details
+            Method: post
+  SignOut:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://cf-templates-1ff8q1oa0jx49-us-east-1/36de48aaf880aac59ce7bc19741cd206
+      Handler: signout.handler
+      Runtime: nodejs12.x
+      Timeout: 30
+      Policies:
+      - Statement:
+        - Sid: Cognito
+          Effect: Allow
+          Action:
+          - cognito-idp:*
+          Resource: '*'
+      Environment:
+        Variables:
+          USER_POOL_DOMAIN:
+            Ref: UserPoolDomain
+          USER_POOL_REGION:
+            Ref: AWS::Region
+          USER_POOL_ID:
+            Ref: UserPool
+      Events:
+        HttpEvent:
+          Type: Api
+          Properties:
+            Path: /signout
+            Method: post
+Outputs:
+  UserPoolId:
+    Description: ID of the User Pool
+    Value:
+      Ref: UserPool
+  UserPoolClientId:
+    Description: ID of the User Pool Client
+    Value:
+      Ref: UserPoolClient
