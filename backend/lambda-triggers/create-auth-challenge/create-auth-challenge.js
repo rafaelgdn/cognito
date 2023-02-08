@@ -29,7 +29,7 @@ async function sendEmail(emailAddress, secretLoginCode) {
                 Data: 'Your secret login code'
             }
         },
-        Source: 'rafaeldecarvalho.ps@gmail.com'
+        Source: ''
     };
     await ses.sendEmail(params).promise();
 }
